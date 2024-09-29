@@ -35,7 +35,84 @@ void workerThreadStart(WorkerArgs * const args) {
     // program that uses two threads, thread 0 could compute the top
     // half of the image and thread 1 could compute the bottom half.
 
-    printf("Hello world from thread %d\n", args->threadId);
+    double start = CycleTimer::currentSeconds();
+
+    //-------PART 1.1------------//
+    
+
+    // /*
+    //     The height field controls the number of rows we process in the image
+    //     The startrows field controls where in the image we begin
+    //     Those two variables need to be adjusted in order to select a subset of the rows (ie., top vs bottom half) 
+    //         and to assign the different portions to the different threads. 
+    //     The starting row should be tied to the thread id number.
+        
+    //     1. Calculate number of rows we want to split into based on the number of threads. 
+    //     2. Determine the starting row we for each thread to begin at.
+    //     3. Ensure that we do not exceed the number of threads for the last row.
+    // */
+
+    // // insert timing code to measure execution time for each thread
+
+    // int num_rows_split = args->height/args->numThreads; // splitting image up
+    // int starting_row = args->threadId*num_rows_split; // offset image start
+
+    // // account for non-equal splits (when height not divisible by num threads) for last thread.
+    // int number_rows_process = 0;
+    // if(args->threadId == args->numThreads-1){
+    //     number_rows_process = args->height - starting_row; 
+    // }
+    // else{
+    //     number_rows_process = num_rows_split;
+    // }
+
+    // // call MandelbrotSerial using the updated row and heights
+    // mandelbrotSerial(
+    // args->x0, args->y0, args->x1, args->y1,
+    // args->width, args->height,
+    // starting_row, number_rows_process,
+    // args->maxIterations,
+    // args->output);
+
+    // replace with printf at the end 
+    //printf("Hello world from thread %d. Number of rows computed %d. Starting row %d. Execution took %f\n", args->threadId, number_rows_process, starting_row, end-start);
+
+
+    //----------------------------------//
+
+    //-------PART 1.4-------------//
+
+    /*
+    To improve performance speed up without added synchronization, we should employ a work decomp stragey that distributes the work more evenly.
+        We can assign each thread rows that are not contiguous, such that on average the required number of iterations to solve per thread is more uniform.
+
+    Here we implement a round-robin decomposition policy based on the rows. 
+    */
+
+    int starting_row = args->threadId; 
+    int rows_computed = 0;
+    while(unsigned(starting_row) < args->height){
+        // continuously call mandelbrot one row at a time so we can do non-contiguous rows
+        mandelbrotSerial(
+        args->x0, args->y0, args->x1, args->y1,
+        args->width, args->height,
+        starting_row, 1,
+        args->maxIterations,
+        args->output);
+
+        rows_computed++;
+        starting_row += args->numThreads;
+    }
+
+
+    /*
+    Is it possible to further improve performance by separating the image into blocks instead to be processed instead of rows?
+    */
+
+    double end = CycleTimer::currentSeconds();
+    
+    printf("Hello world from thread %d. Number of rows computed %d. Execution took %f\n", args->threadId, rows_computed, end-start);
+
 }
 
 //
