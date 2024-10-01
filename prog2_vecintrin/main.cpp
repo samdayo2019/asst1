@@ -129,6 +129,7 @@ bool verifyResult(float* values, int* exponents, float* output, float* gold, int
   for (int i=0; i<N+VECTOR_WIDTH; i++) {
     if ( abs(output[i] - gold[i]) > epsilon ) {
       incorrect = i;
+      printf("O: %f and g: %f\n", output[i], gold[i]);
       break;
     }
   }
@@ -249,7 +250,49 @@ void clampedExpVector(float* values, int* exponents, float* output, int N) {
   // Your solution should work for any value of
   // N and VECTOR_WIDTH, not just when VECTOR_WIDTH divides N
   //
-  
+  __cs149_vec_float x; // create vector array for x
+  __cs149_vec_int y, count = _cs149_vset_int(0); // create vector array for y and set count equal to all 0
+  __cs149_vec_float result = _cs149_vset_float(100), nines = _cs149_vset_float(9.999999f); // create vector array for the output 
+  __cs149_vec_int zero = _cs149_vset_int(0), ones = _cs149_vset_int(1); // initialize array of 0s
+  __cs149_mask all, count_zeroes, maskIsZero, maskIsNotZero, greaterThan;
+  int i = 0, width = VECTOR_WIDTH; 
+  // copy initial for loop structure
+  for (i = 0; i < N; i+=VECTOR_WIDTH){
+    // check if we need to adjust the size of the vector taken, by masking the last remainder - vector_width bits
+    if (((N - i) % VECTOR_WIDTH > 0) && ((N - i)/(int)VECTOR_WIDTH == 0)){
+      width = N%VECTOR_WIDTH;
+    }
+    all = _cs149_init_ones(width); 
+    count_zeroes = _cs149_mask_not(all); // init count_zeroes to be all 0
+    greaterThan = _cs149_mask_not(all);
+    _cs149_vload_float(x, values + i, all); //load all x values
+    _cs149_vload_int(y, exponents + i, all); // load all y values
+    _cs149_veq_int(maskIsZero, y, zero, all); // set vector lane to 1 if y element equal to 0
+    _cs149_vset_float(result, 1.f, maskIsZero); // set register value in result if mask lane = 0
+    maskIsNotZero = _cs149_mask_not(maskIsZero); // flip mask to execute else case
+    _cs149_vmove_float(result, x, maskIsNotZero); // float result = x
+    _cs149_vmove_int(count, y, maskIsNotZero); // count = y
+    _cs149_vsub_int(count, count, ones, maskIsNotZero); // count = y -1
+    _cs149_vgt_int(count_zeroes, count, zero, maskIsNotZero); // set mask to 1 if count value is not 0
+
+
+    // check if all bit positions in register have count = 0
+    while (int val = _cs149_cntbits(count_zeroes)){
+      // printf("% d", val);
+      _cs149_vmult_float(result, result, x, count_zeroes); // result*=x
+      _cs149_vsub_int(count, count, ones, count_zeroes); //count --
+      // calculate new mask in case new count value in registers has gone to 0
+      _cs149_vgt_int(count_zeroes, count, zero, count_zeroes); // set mask to 1 if count value is not 0
+    }
+
+    // check if results are greater than 
+    _cs149_vgt_float(greaterThan, result, nines, maskIsNotZero); 
+    _cs149_vset_float(result, 9.999999f, greaterThan);
+
+    // check if there are too many results 
+    _cs149_vstore_float(output + i, result, all); 
+  }
+
 }
 
 // returns the sum of all elements in values
