@@ -3,10 +3,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <thread>
+#include <fstream> //included to allow for creation of file to input profiled data over multiple iterations.
 
 #include "CycleTimer.h"
 
 using namespace std;
+
+#define THREADS 8 //hardcode max threads to 8: quad-core + hyper-threading
 
 typedef struct {
   // Control work assignments
@@ -18,6 +21,9 @@ typedef struct {
   int *clusterAssignments;
   double *currCost;
   int M, N, K;
+
+  int threadID; // add new member for threadID.
+  int starting_dp;
 } WorkerArgs;
 
 
@@ -63,19 +69,30 @@ double dist(double *x, double *y, int nDim) {
 
 /**
  * Assigns each data point to its "closest" cluster centroid.
+ * N = number of dimensions (features) for each data point. 
+ * M = total number of data points (samples) 
+ * K = total number of clusters (cluster centres)
  */
 void computeAssignments(WorkerArgs *const args) {
   double *minDist = new double[args->M];
-  
+
   // Initialize arrays
-  for (int m =0; m < args->M; m++) {
+  /*
+    These array initializations are very simple operations that can be completed in constant-time. 
+    As a result, their overall time complexity is linear O(M). Creating threads to parallelize these operations, and the
+      associated overhead in synchronizing them (in joining), spawning them, and starting them would likely take longer 
+      than computing these operations serially. This also applies to having two seperate threads initialize the seperate 
+      arrays in parallel.
+  */
+  for (int m = args->starting_dp; m < args->M; m++) {
     minDist[m] = 1e30;
     args->clusterAssignments[m] = -1;
   }
-
   // Assign datapoints to closest centroids
+
+
   for (int k = args->start; k < args->end; k++) {
-    for (int m = 0; m < args->M; m++) {
+    for (int m = args->starting_dp; m < args->M; m++) {
       double d = dist(&args->data[m * args->N],
                       &args->clusterCentroids[k * args->N], args->N);
       if (d < minDist[m]) {
@@ -86,6 +103,45 @@ void computeAssignments(WorkerArgs *const args) {
   }
 
   free(minDist);
+}
+
+// function hard-coded for 8 threads.
+void computeAssignmentsWithThreads(WorkerArgs *const args){
+  std::thread worker_threads[THREADS]; // init 8 threads
+  WorkerArgs work_args[THREADS];  // init 8 args structs for each thread.
+
+  int work_split = args->M / THREADS;
+
+  // Update per-thread arguments. Simply copying over args and adding thread id member.
+  // all threads point to same clusterAssignment, clusterCentroids, currCost arrays, and data arrays.
+  for(int i = 0; i < THREADS; i++){
+    work_args[i].threadID = i;
+    work_args[i].clusterAssignments = args->clusterAssignments; 
+    work_args[i].clusterCentroids = args->clusterCentroids;
+    work_args[i].currCost = args->currCost;
+    work_args[i].data = args->data;
+    work_args[i].start = args->start;
+    work_args[i].end = args->end;
+    work_args[i].K = args->K; // each thread processes all k clusters
+    work_args[i].N = args->N; // number of features remains unchanged as dimensionality required for euclidean distance.
+
+    work_args[i].starting_dp = work_args[i].threadID*work_split;
+
+    work_args[i].M = (work_args[i].threadID == THREADS - 1) ? args->M - work_args[i].starting_dp: work_split; // we need to split the M among clusters. We begin with simple static decomp
+
+  }
+
+  for(int i = 1; i < THREADS; i++){
+    worker_threads[i] = std::thread(computeAssignments, &work_args[i]);
+  }
+
+
+  computeAssignments(&work_args[0]);
+
+  for(int i = 1; i < THREADS; i++){
+    worker_threads[i].join();
+  }
+
 }
 
 /**
@@ -195,6 +251,21 @@ void kMeansThread(double *data, double *clusterCentroids, int *clusterAssignment
     currCost[k] = 0.0;
   }
 
+  float start_assignment = 0;
+  float stop_assignment = 0;
+  float start_centroids = 0;
+  float stop_centroids  = 0;
+  float start_cost = 0;
+  float stop_cost = 0;
+
+  float diff_assignment = 0; 
+  float diff_centroids = 0; 
+  float diff_cost = 0; 
+  
+  ofstream outputFile("Average_Profiled_Elapsed_Times.csv");
+
+  outputFile << "Assignment" << ","  << "Centroids" << "," << "Cost" << endl;
+
   /* Main K-Means Algorithm Loop */
   int iter = 0;
   while (!stoppingConditionMet(prevCost, currCost, epsilon, K)) {
@@ -207,12 +278,37 @@ void kMeansThread(double *data, double *clusterCentroids, int *clusterAssignment
     args.start = 0;
     args.end = K;
 
-    computeAssignments(&args);
+
+    // embedd profiling code to time execution time of each of the three functions
+    start_assignment = CycleTimer::currentSeconds();
+    computeAssignmentsWithThreads(&args);
+    stop_assignment = CycleTimer::currentSeconds();
+
+    start_centroids = CycleTimer::currentSeconds();
     computeCentroids(&args);
+    stop_centroids = CycleTimer::currentSeconds();
+
+    start_cost = CycleTimer::currentSeconds();
     computeCost(&args);
+    stop_cost = CycleTimer::currentSeconds();
+
+    // printf("%d ", iter);
 
     iter++;
+    diff_assignment += (stop_assignment - start_assignment);
+    diff_centroids += (stop_centroids - start_centroids);
+    diff_cost += (stop_cost - start_cost);
+
   }
+
+  diff_assignment /= iter; 
+  diff_centroids /= iter; 
+  diff_cost /= iter; 
+
+  outputFile << diff_assignment << "," << diff_centroids << "," << diff_cost << endl;
+  outputFile.close(); // finish writing into the output file. Will be opened and processed by analysis.py
+
+  printf("Elapse time for Assignment function: %f.\nElapsed time for Centroids function: %f.\nElapsed time for Cost function: %f.\nIter was: %d\n", diff_assignment, diff_centroids, diff_cost, iter);
 
   free(currCost);
   free(prevCost);

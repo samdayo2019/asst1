@@ -7,6 +7,7 @@
 #include <string>
 
 #include "CycleTimer.h"
+#include <fstream>
 
 #define SEED 7
 #define SAMPLE_RATE 1e-2
@@ -127,6 +128,10 @@ int main() {
   //           &K, &epsilon);
   */
 
+  ofstream outputFile2("Total_kmeans_time.csv");
+  outputFile2 << "Run time for Kmeans" << endl;
+
+
   printf("Running K-means with: M=%d, N=%d, K=%d, epsilon=%f\n", M, N,
          K, epsilon);
 
@@ -142,6 +147,9 @@ int main() {
   // Log the end state of the algorithm
   logToFile("./end.log", SAMPLE_RATE, data, clusterAssignments,
             clusterCentroids, M, N, K);
+  
+  outputFile2 << (endTime - startTime) * 1000 << endl;
+  outputFile2.close();
 
   free(data);
   free(clusterCentroids);
