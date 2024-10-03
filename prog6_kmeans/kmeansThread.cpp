@@ -74,42 +74,70 @@ double dist(double *x, double *y, int nDim) {
  * K = total number of clusters (cluster centres)
  */
 void computeAssignments(WorkerArgs *const args) {
-  double *minDist = new double[args->M]; // minDist array should match number of datapoints processed which is m
 
-  // Initialize arrays
-  /*
-    These array initializations are very simple operations that can be completed in constant-time. 
-    As a result, their overall time complexity is linear O(M). Creating threads to parallelize these operations, and the
-      associated overhead in synchronizing them (in joining), spawning them, and starting them would likely take longer 
-      than computing these operations serially. This also applies to having two seperate threads initialize the seperate 
-      arrays in parallel.
-  */
-  for (int m = 0; m < args->M; m++) {
-    minDist[m] = 1e30;
-    args->clusterAssignments[args->starting_dp + m] = -1;
-  }
-  // Assign datapoints to closest centroids
+//----------------------------------------------------------------------------------------------//
+  /* second attempt. Performance enhancement using round robin decompositon for load balancing.*/
+  double minDist; // minDist array should match number of datapoints processed which is m
 
-  for (int k = args->start; k < args->end; k++) {
-    for (int m = 0; m < args->M; m++) {
-      double d = dist(&args->data[(args->starting_dp + m)* args->N],
-                      &args->clusterCentroids[k * args->N], args->N);
-      if (d < minDist[m]) {
-        minDist[m] = d;
-        args->clusterAssignments[args->starting_dp + m] = k;
-      }
+  while(args->starting_dp < args->M){
+    minDist = 1e30; // reset min dist for next datapoint
+    for (int k = args->start; k < args->end; k++) {
+        double d = dist(&args->data[(args->starting_dp)* args->N],
+                        &args->clusterCentroids[k * args->N], args->N);
+        if (d < minDist) {
+          minDist = d;
+          args->clusterAssignments[args->starting_dp] = k;
+        }
     }
+
+    args->starting_dp += THREADS;
   }
 
-  free(minDist);
+
+//------------------------------------------------------------------------------------------------------//
+  // /* first optimization attempt. Simple static decomp using sequential assignments to threads. */
+  // double *minDist = new double[args->M]; // minDist array should match number of datapoints processed which is m
+
+  // // Initialize arrays
+  // /*
+  //   These array initializations are very simple operations that can be completed in constant-time. 
+  //   As a result, their overall time complexity is linear O(M). Creating threads to parallelize these operations, and the
+  //     associated overhead in synchronizing them (in joining), spawning them, and starting them would likely take longer 
+  //     than computing these operations serially. This also applies to having two seperate threads initialize the seperate 
+  //     arrays in parallel.
+  // */
+  // for (int m = 0; m < args->M; m++) {
+  //   minDist[m] = 1e30;
+  //   args->clusterAssignments[args->starting_dp + m] = -1;
+  // }
+  // // Assign datapoints to closest centroids
+
+  // for (int k = args->start; k < args->end; k++) {
+  //   for (int m = 0; m < args->M; m++) {
+  //     double d = dist(&args->data[(args->starting_dp + m)* args->N],
+  //                     &args->clusterCentroids[k * args->N], args->N);
+  //     if (d < minDist[m]) {
+  //       minDist[m] = d;
+  //       args->clusterAssignments[args->starting_dp + m] = k;
+  //     }
+  //   }
+  // }
+
+  // free(minDist); 
 }
 
 // function hard-coded for 8 threads.
 void computeAssignmentsWithThreads(WorkerArgs *const args){
+
+//----------------------------------------------------------------------//
+  /* second attempt. Performance enhancement using round robin decompositon for load balancing.*/
+  
   std::thread worker_threads[THREADS]; // init 8 threads
   WorkerArgs work_args[THREADS];  // init 8 args structs for each thread.
 
-  int work_split = args->M / THREADS;
+  for (int m = 0; m < args->M; m++) {
+    args->clusterAssignments[m] = -1;
+  }
 
   // Update per-thread arguments. Simply copying over args and adding thread id member.
   // all threads point to same clusterAssignment, clusterCentroids, currCost arrays, and data arrays.
@@ -124,10 +152,8 @@ void computeAssignmentsWithThreads(WorkerArgs *const args){
     work_args[i].K = args->K; // each thread processes all k clusters
     work_args[i].N = args->N; // number of features remains unchanged as dimensionality required for euclidean distance.
 
-    work_args[i].starting_dp = work_args[i].threadID*work_split;
-
-    work_args[i].M = (work_args[i].threadID == THREADS - 1) ? args->M - work_args[i].starting_dp : work_split; // we need to split the M among clusters. We begin with simple static decomp
-
+    work_args[i].starting_dp =  i;
+    work_args[i].M = args->M;
   }
 
   for(int i = 1; i < THREADS; i++){
@@ -140,6 +166,45 @@ void computeAssignmentsWithThreads(WorkerArgs *const args){
   for(int i = 1; i < THREADS; i++){
     worker_threads[i].join();
   }
+
+
+//-------------------------------------------------------------------------------------// 
+  /* first optimization attempt. Simple static decomp using sequential assignments to threads.*/
+
+  // std::thread worker_threads[THREADS]; // init 8 threads
+  // WorkerArgs work_args[THREADS];  // init 8 args structs for each thread.
+
+  // int work_split = args->M / THREADS;
+
+  // // Update per-thread arguments. Simply copying over args and adding thread id member.
+  // // all threads point to same clusterAssignment, clusterCentroids, currCost arrays, and data arrays.
+  // for(int i = 0; i < THREADS; i++){
+  //   work_args[i].threadID = i;
+  //   work_args[i].clusterAssignments = args->clusterAssignments; 
+  //   work_args[i].clusterCentroids = args->clusterCentroids;
+  //   work_args[i].currCost = args->currCost;
+  //   work_args[i].data = args->data;
+  //   work_args[i].start = args->start;
+  //   work_args[i].end = args->end;
+  //   work_args[i].K = args->K; // each thread processes all k clusters
+  //   work_args[i].N = args->N; // number of features remains unchanged as dimensionality required for euclidean distance.
+
+  //   work_args[i].starting_dp = work_args[i].threadID*work_split;
+
+  //   work_args[i].M = (work_args[i].threadID == THREADS - 1) ? args->M - work_args[i].starting_dp : work_split; // we need to split the M among clusters. We begin with simple static decomp
+
+  // }
+
+  // for(int i = 1; i < THREADS; i++){
+  //   worker_threads[i] = std::thread(computeAssignments, &work_args[i]);
+  // }
+
+
+  // computeAssignments(&work_args[0]);
+
+  // for(int i = 1; i < THREADS; i++){
+  //   worker_threads[i].join();
+  // }
 
 }
 
