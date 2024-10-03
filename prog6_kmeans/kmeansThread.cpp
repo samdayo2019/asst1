@@ -74,7 +74,7 @@ double dist(double *x, double *y, int nDim) {
  * K = total number of clusters (cluster centres)
  */
 void computeAssignments(WorkerArgs *const args) {
-  double *minDist = new double[args->M];
+  double *minDist = new double[args->M]; // minDist array should match number of datapoints processed which is m
 
   // Initialize arrays
   /*
@@ -84,20 +84,19 @@ void computeAssignments(WorkerArgs *const args) {
       than computing these operations serially. This also applies to having two seperate threads initialize the seperate 
       arrays in parallel.
   */
-  for (int m = args->starting_dp; m < args->M; m++) {
+  for (int m = 0; m < args->M; m++) {
     minDist[m] = 1e30;
-    args->clusterAssignments[m] = -1;
+    args->clusterAssignments[args->starting_dp + m] = -1;
   }
   // Assign datapoints to closest centroids
 
-
   for (int k = args->start; k < args->end; k++) {
-    for (int m = args->starting_dp; m < args->M; m++) {
-      double d = dist(&args->data[m * args->N],
+    for (int m = 0; m < args->M; m++) {
+      double d = dist(&args->data[(args->starting_dp + m)* args->N],
                       &args->clusterCentroids[k * args->N], args->N);
       if (d < minDist[m]) {
         minDist[m] = d;
-        args->clusterAssignments[m] = k;
+        args->clusterAssignments[args->starting_dp + m] = k;
       }
     }
   }
@@ -127,7 +126,7 @@ void computeAssignmentsWithThreads(WorkerArgs *const args){
 
     work_args[i].starting_dp = work_args[i].threadID*work_split;
 
-    work_args[i].M = (work_args[i].threadID == THREADS - 1) ? args->M - work_args[i].starting_dp: work_split; // we need to split the M among clusters. We begin with simple static decomp
+    work_args[i].M = (work_args[i].threadID == THREADS - 1) ? args->M - work_args[i].starting_dp : work_split; // we need to split the M among clusters. We begin with simple static decomp
 
   }
 
@@ -244,6 +243,8 @@ void kMeansThread(double *data, double *clusterCentroids, int *clusterAssignment
   args.M = M;
   args.N = N;
   args.K = K;
+  args.starting_dp = 0;
+  
 
   // Initialize arrays to track cost
   for (int k = 0; k < K; k++) {
